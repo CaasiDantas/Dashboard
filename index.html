@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard de Multas ANTT — Dexco / Duratex</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* (mesmo CSS anterior, mantido para não repetir) */
+  :root {
+    --bg:#0a0c12;--surface:#11141d;--surface2:#181c28;--border:#232840;
+    --accent:#2e6da4;--accent2:#4a90d9;--accent3:#1d7a55;--danger:#b83232;
+    --warn:#b86c00;--text:#e8eaf2;--muted:#9ca3af;--light:#6b7280;
+    --dexco:#c8841a;--duratex:#4a90d9;
+    --shadow:0 1px 4px rgba(0,0,0,0.3),0 4px 16px rgba(0,0,0,0.2);
+    --red:#d8165b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:60px;}
+
+  #loading-overlay{position:fixed;inset:0;background:#0a0c12;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;transition:opacity .4s;}
+  #loading-overlay.hidden{opacity:0;pointer-events:none;}
+  .spinner{width:40px;height:40px;border:2px solid var(--border);border-top-color:var(--red);border-radius:50%;animation:spin .9s linear infinite;margin-bottom:16px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .loading-text{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+  .loading-sub{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--light);letter-spacing:1px;margin-top:8px;opacity:0.7;}
+
+  #error-box{display:none;margin:40px auto;max-width:680px;padding:24px 28px;background:rgba(184,50,50,0.1);border:1px solid rgba(184,50,50,0.3);border-left:4px solid var(--danger);border-radius:6px;color:#fca5a5;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;}
+  #error-box .err-title{font-size:14px;font-weight:600;color:#f87171;margin-bottom:12px;}
+  #error-box .err-action{margin-top:16px;padding-top:14px;border-top:1px solid rgba(184,50,50,0.2);font-size:11px;color:#9ca3af;}
+  #error-box button{margin-top:10px;background:rgba(216,22,91,0.2);border:1px solid rgba(216,22,91,0.4);color:#f9a8d4;padding:7px 18px;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;}
+  #error-box button:hover{background:rgba(216,22,91,0.35);}
+
+  .header{background:#0d1829;padding:0 48px;display:flex;align-items:stretch;justify-content:space-between;position:relative;overflow:hidden;}
+  .header::after{content:'';position:absolute;right:0;top:0;bottom:0;width:320px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.03));pointer-events:none;}
+  .header-left{padding:28px 0 24px;border-right:1px solid rgba(255,255,255,0.1);padding-right:40px;margin-right:40px;}
+  .header-eyebrow{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:8px;}
+  .header-left h1{font-family:'Times New Roman',Times,serif;font-size:26px;font-weight:700;color:#fff;letter-spacing:-0.3px;line-height:1.15;}
+  .header-left h1 span{color:var(--red);}
+  .header-left p{font-size:12px;color:rgba(255,255,255,0.55);margin-top:6px;font-weight:400;letter-spacing:0.2px;}
+  .header-right{display:flex;align-items:center;gap:32px;padding:24px 0;}
+  .header-stat{text-align:center;}
+  .header-stat-val{font-family:'Times New Roman',Times,serif;font-size:22px;font-weight:600;color:var(--red);}
+  .header-stat-label{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.45);text-transform:uppercase;margin-top:2px;}
+  .header-divider{width:1px;height:40px;background:rgba(255,255,255,0.12);}
+  .header-meta{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+  .last-update{font-family:'IBM Plex Mono',monospace;font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:.5px;}
+  .refresh-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:rgba(255,255,255,0.7);padding:6px 16px;border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;transition:all .2s;}
+  .refresh-btn:hover{background:rgba(255,255,255,0.15);color:#fff;}
+  .refresh-btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .auto-refresh-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:rgba(255,255,255,0.7);padding:6px 16px;border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;transition:all .2s;margin-left:8px;}
+  .auto-refresh-btn.active{background:rgba(216,22,91,0.2);border-color:rgba(216,22,91,0.6);color:#fff;}
+  .export-btn{background:rgba(29,122,85,0.15);border:1px solid rgba(29,122,85,0.4);color:#34d399;padding:6px 16px;border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;transition:all .2s;display:flex;align-items:center;gap:6px;}
+  .export-btn:hover{background:rgba(29,122,85,0.28);border-color:rgba(29,122,85,0.7);color:#6ee7b7;}
+  .export-btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+  #status-bar{display:none;font-family:'IBM Plex Mono',monospace;font-size:10px;text-align:center;padding:6px;letter-spacing:1px;}
+  #status-bar.trying{background:rgba(180,108,0,0.15);color:#fbbf24;border-bottom:1px solid rgba(180,108,0,0.2);}
+  #status-bar.ok{background:rgba(29,122,85,0.12);color:#34d399;border-bottom:1px solid rgba(29,122,85,0.2);}
+
+  .filter-bar{display:flex;gap:0;align-items:center;padding:0 48px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  .filter-label{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-right:20px;padding:16px 0;}
+  .filter-btn{background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);padding:16px 20px;cursor:pointer;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;transition:all .18s;letter-spacing:0.2px;margin-bottom:-1px;}
+  .filter-btn:hover{color:var(--red);border-bottom-color:rgba(216,22,91,0.3);}
+  .filter-btn.active{color:var(--red);border-bottom-color:var(--red);font-weight:600;}
+
+  .main{padding:32px 48px;}
+  .section-label{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;color:var(--red);text-transform:uppercase;margin-bottom:14px;margin-top:36px;display:flex;align-items:center;gap:12px;}
+  .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+  .section-label:first-child{margin-top:0;}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;}
+  .kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:22px 24px;position:relative;overflow:hidden;transition:box-shadow .2s,transform .2s;box-shadow:var(--shadow);}
+  .kpi-card:hover{box-shadow:0 4px 20px rgba(0,0,0,0.1);transform:translateY(-1px);}
+  .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--red);}
+  .kpi-icon{font-size:16px;margin-bottom:12px;display:block;color:var(--red);}
+  .kpi-label{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#ffffff;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;font-weight:600;}
+  .kpi-value{font-family:'Times New Roman',Times,serif;font-size:22px;font-weight:600;line-height:1;color:#ffffff;}
+  .kpi-sub{font-size:11px;color:#adb5bd;margin-top:8px;font-weight:400;letter-spacing:0.1px;}
+
+  .charts-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  .charts-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}
+  .chart-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:26px;box-shadow:var(--shadow);}
+  .chart-header{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);}
+  .chart-title{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;color:#ffffff;letter-spacing:0.1px;}
+  .chart-subtitle{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-top:4px;letter-spacing:1px;text-transform:uppercase;}
+
+  .table-wrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead tr th{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--light);padding:10px 14px;border-bottom:2px solid var(--border);text-align:left;white-space:nowrap;}
+  tbody tr td{padding:11px 14px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover td{background:rgba(255,255,255,0.03);}
+  .rank-num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
+  .rank-num.top3{background:rgba(216,22,91,0.15);color:var(--red);border-color:rgba(216,22,91,0.3);}
+  .badge{display:inline-block;padding:2px 10px;border-radius:3px;font-size:10px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:.5px;text-transform:uppercase;}
+  .badge-dexco{background:rgba(200,132,26,0.15);color:var(--dexco);border:1px solid rgba(200,132,26,0.25);}
+  .badge-duratex{background:rgba(74,144,217,0.15);color:var(--duratex);border:1px solid rgba(74,144,217,0.2);}
+
+  .prog-bar-wrap{margin-bottom:16px;}
+  .prog-bar-header{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:6px;font-weight:500;color:var(--text);}
+  .prog-bar-header .prog-count{font-family:'IBM Plex Mono',monospace;color:var(--muted);font-size:11px;}
+  .prog-bar-bg{height:6px;background:var(--surface2);border-radius:2px;overflow:hidden;border:1px solid var(--border);}
+  .prog-bar-fill{height:100%;border-radius:2px;transition:width 1s cubic-bezier(.4,0,.2,1);}
+
+  .empresa-split{display:flex;border-radius:3px;overflow:hidden;height:8px;margin-bottom:14px;border:1px solid var(--border);}
+  .empresa-seg{height:100%;}
+  .empresa-seg.dexco{background:var(--dexco);}
+  .empresa-seg.duratex{background:var(--duratex);}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;}
+  .legend-item{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--text);}
+  .legend-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
+
+  .footer{margin:40px 48px 0;padding-top:20px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+  .footer-text{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--light);letter-spacing:1px;}
+
+  .cnpj-filter-wrap{position:relative;display:inline-block;}
+  .cnpj-btn{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.75);padding:6px 14px 6px 12px;border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:1px;transition:all .2s;display:flex;align-items:center;gap:8px;white-space:nowrap;}
+  .cnpj-btn:hover{background:rgba(255,255,255,0.12);color:#fff;}
+  .cnpj-btn.active{background:rgba(216,22,91,0.2);border-color:rgba(216,22,91,0.6);color:#fff;}
+  .cnpj-btn .arrow{font-size:8px;opacity:0.6;transition:transform .2s;}
+  .cnpj-btn.open .arrow{transform:rotate(180deg);}
+  .cnpj-dropdown{display:none;position:fixed;background:#181c28;border:1px solid rgba(255,255,255,0.12);border-radius:4px;z-index:9999;min-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.5);overflow:hidden;max-height:420px;display:none;flex-direction:column;}
+  .cnpj-dropdown.open{display:flex;}
+  .cnpj-dropdown-header{padding:8px 14px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--light);text-transform:uppercase;border-bottom:1px solid var(--border);flex-shrink:0;}
+  #cnpj-options-list{overflow-y:auto;flex:1;min-height:0;}
+  #cnpj-options-list::-webkit-scrollbar{width:4px;}
+  #cnpj-options-list::-webkit-scrollbar-track{background:transparent;}
+  #cnpj-options-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:2px;}
+  .cnpj-option{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;transition:background .15s;border-bottom:1px solid rgba(255,255,255,0.04);}
+  .cnpj-option:last-child{border-bottom:none;}
+  .cnpj-option:hover{background:rgba(255,255,255,0.05);}
+  .cnpj-option.selected{background:rgba(216,22,91,0.12);}
+  .cnpj-option-all{display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;transition:background .15s;border-bottom:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);}
+  .cnpj-option-all:hover{background:rgba(255,255,255,0.06);}
+  .cnpj-option-all.selected{background:rgba(29,122,85,0.15);color:#34d399;}
+  .cnpj-option-all-label{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--text);}
+  .cnpj-option-all-count{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);background:rgba(255,255,255,0.06);padding:2px 7px;border-radius:2px;margin-left:auto;}
+  .cnpj-option-left{display:flex;flex-direction:column;gap:2px;}
+  .cnpj-option-num{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text);font-weight:500;}
+  .cnpj-option-name{font-size:10px;color:var(--muted);}
+  .cnpj-option-count{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--red);background:rgba(216,22,91,0.12);padding:2px 7px;border-radius:2px;}
+  .cnpj-clear{display:block;width:100%;padding:8px 14px;text-align:center;background:rgba(255,255,255,0.03);border:none;border-top:1px solid var(--border);color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;transition:all .15s;flex-shrink:0;}
+  .cnpj-clear:hover{color:var(--text);background:rgba(255,255,255,0.06);}
+
+  @media(max-width:1280px){.kpi-grid{grid-template-columns:repeat(3,1fr);}.charts-grid-3{grid-template-columns:1fr 1fr;}.header-right{gap:20px;}}
+  @media(max-width:900px){.header{flex-direction:column;padding:24px;}.header-left{border-right:none;padding-right:0;margin-right:0;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:20px;margin-bottom:20px;}.header,.filter-bar,.main{padding-left:20px;padding-right:20px;}.kpi-grid{grid-template-columns:1fr 1fr;}.charts-grid-2,.charts-grid-3{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">Conectando à planilha</div>
+  <div class="loading-sub" id="loading-sub">Aguarde...</div>
+</div>
+
+<div id="status-bar"></div>
+<div id="error-box"></div>
+
+<div class="header">
+  <div class="header-left">
+    <div class="header-eyebrow">Controle de Infrações</div>
+    <h1>Dashboard <span>de Multas ANTT</span></h1>
+    <p>DEXCO &amp; DURATEX — Dados via Google Sheets</p>
+  </div>
+  <div class="header-right">
+    <div class="header-stat">
+      <div class="header-stat-val" id="hstat-total">—</div>
+      <div class="header-stat-label">Valor Total</div>
+    </div>
+    <div class="header-divider"></div>
+    <div class="header-stat">
+      <div class="header-stat-val" id="hstat-count">—</div>
+      <div class="header-stat-label">Registros</div>
+    </div>
+    <div class="header-divider"></div>
+    <div class="header-meta">
+      <div class="last-update" id="last-update">Aguardando dados...</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="cnpj-filter-wrap">
+          <button type="button" class="cnpj-btn" id="cnpj-btn" onclick="toggleCNPJDropdown()">
+            <span id="cnpj-btn-label">⊞ CNPJ</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="cnpj-dropdown" id="cnpj-dropdown">
+            <div class="cnpj-dropdown-header">Filtrar por CNPJ</div>
+            <div id="cnpj-options-list"></div>
+            <button type="button" class="cnpj-clear" onclick="setCNPJFilter(null)">✕ Limpar filtro</button>
+          </div>
+        </div>
+        <button type="button" class="export-btn" id="export-btn" onclick="exportToExcel()" disabled>⬇ Exportar</button>
+        <button type="button" class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">↻ Atualizar</button>
+        <button type="button" class="auto-refresh-btn" id="auto-refresh-btn" onclick="toggleAutoRefresh()">⏱ Auto: OFF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="filter-bar">
+  <span class="filter-label">EMPRESA</span>
+  <button class="filter-btn active" id="f-all"     onclick="setFilter('all')">Todas</button>
+  <button class="filter-btn"        id="f-dexco"   onclick="setFilter('DEXCO')">DEXCO</button>
+  <button class="filter-btn"        id="f-duratex" onclick="setFilter('DURATEX')">DURATEX</button>
+  <button class="filter-btn"        id="f-outros"  onclick="setFilter('OUTROS')">Outros</button>
+</div>
+
+<div class="main" id="main-content" style="display:none">
+  <!-- Conteúdo igual ao anterior -->
+  <div class="section-label">Indicadores Principais</div>
+  <div class="kpi-grid">
+    <div class="kpi-card navy">  <span class="kpi-icon">◈</span><div class="kpi-label">Valor Total de Multas</div><div class="kpi-value" id="kpi-total">—</div><div class="kpi-sub" id="kpi-total-sub">—</div></div>
+    <div class="kpi-card blue">  <span class="kpi-icon">◷</span><div class="kpi-label">Multas a Vencer</div><div class="kpi-value" id="kpi-avencer">—</div><div class="kpi-sub" id="kpi-avencer-sub">—</div></div>
+    <div class="kpi-card red">   <span class="kpi-icon">◉</span><div class="kpi-label">Vencidas / Serasa</div><div class="kpi-value" id="kpi-vencidas">—</div><div class="kpi-sub" id="kpi-vencidas-sub">—</div></div>
+    <div class="kpi-card amber">  <span class="kpi-icon">◎</span><div class="kpi-label">Valor Médio / Infração</div><div class="kpi-value" id="kpi-medio">—</div><div class="kpi-sub" id="kpi-medio-sub">—</div></div>
+    <div class="kpi-card green"> <span class="kpi-icon">◆</span><div class="kpi-label">Pagas / Arquivadas</div><div class="kpi-value" id="kpi-pagas">—</div><div class="kpi-sub" id="kpi-pagas-sub">—</div></div>
+  </div>
+
+  <div class="section-label">Distribuição por Status e Empresa</div>
+  <div class="charts-grid-3">
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Status das Multas</div><div class="chart-subtitle">Distribuição por situação atual</div></div><div style="position:relative;height:190px"><canvas id="chartStatus"></canvas></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Quantidade por Empresa</div><div class="chart-subtitle">Total de multas por autuado</div></div><div class="empresa-split" id="empresa-bar-q"></div><div class="legend"><div class="legend-item"><div class="legend-dot" style="background:var(--duratex)"></div>DURATEX <span style="color:var(--muted);font-size:11px;font-family:'IBM Plex Mono',monospace;margin-left:4px" id="duratex-q-label"></span></div><div class="legend-item"><div class="legend-dot" style="background:var(--dexco)"></div>DEXCO <span style="color:var(--muted);font-size:11px;font-family:'IBM Plex Mono',monospace;margin-left:4px" id="dexco-q-label"></span></div></div><div style="position:relative;height:130px"><canvas id="chartEmpresa"></canvas></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Valor por Empresa</div><div class="chart-subtitle">R$ total de multas por autuado</div></div><div class="empresa-split" id="empresa-bar-v"></div><div class="legend"><div class="legend-item"><div class="legend-dot" style="background:var(--duratex)"></div>DURATEX <span style="color:var(--muted);font-size:11px;font-family:'IBM Plex Mono',monospace;margin-left:4px" id="duratex-v-label"></span></div><div class="legend-item"><div class="legend-dot" style="background:var(--dexco)"></div>DEXCO <span style="color:var(--muted);font-size:11px;font-family:'IBM Plex Mono',monospace;margin-left:4px" id="dexco-v-label"></span></div></div><div style="position:relative;height:130px"><canvas id="chartEmpresaVal"></canvas></div></div>
+  </div>
+
+  <div class="section-label">Rankings</div>
+  <div class="charts-grid-2">
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">🏆 Top 10 Placas com Mais Multas</div><div class="chart-subtitle">Veículos com maior incidência</div></div><div class="table-wrap"><table><thead><tr><th>#</th><th>Placa</th><th>Empresa</th><th>Ocorrências</th><th>% do Total</th></tr></thead><tbody id="table-placas"></tbody></table></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">⚠️ Top 5 Infrações Mais Cometidas</div><div class="chart-subtitle">Descrições com maior frequência</div></div><div id="infracoes-bars"></div></div>
+  </div>
+
+  <div class="section-label">Distribuição Detalhada</div>
+  <div class="charts-grid-2">
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Multas por Placa — Top 10</div><div class="chart-subtitle">Barras horizontais por volume</div></div><div style="position:relative;height:280px"><canvas id="chartPlacas"></canvas></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Distribuição de Valores</div><div class="chart-subtitle">Breakdown financeiro: a vencer × vencidas × pagas</div></div><div style="position:relative;height:280px"><canvas id="chartValores"></canvas></div></div>
+  </div>
+
+  <div class="section-label">Multas por CNPJ</div>
+  <div class="charts-grid-2">
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Top CNPJs — Quantidade de Multas</div><div class="chart-subtitle">CNPJs com maior número de infrações</div></div><div style="position:relative;height:320px"><canvas id="chartCnpjsQ"></canvas></div></div>
+    <div class="chart-card"><div class="chart-header"><div class="chart-title">Top CNPJs — Valor Total (R$)</div><div class="chart-subtitle">CNPJs com maior valor acumulado</div></div><div style="position:relative;height:320px"><canvas id="chartCnpjsV"></canvas></div></div>
+  </div>
+
+  <div class="footer"><div class="footer-text">Dashboard de Multas ANTT · DEXCO &amp; DURATEX · Dados: Google Sheets</div><div class="footer-text" id="footer-update">—</div></div>
+</div>
+
+<script>
+// ─── CONFIGURAÇÕES ─────────────────────────────────────────────────────────
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSLp6cGM0qGVfa8GFnOfokO4PEyXHCJlW9mSQdxtDedNwKtnMMwsZoqltCtiOD5EtsE20SSgnj2XQ8Y/pub?gid=0&single=true&output=csv';
+
+const PROXIES = [
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  url => `https://thingproxy.freeboard.io/fetch/${url}`,
+];
+
+const TIMEOUT_MS = 14000;
+const COL = { CNPJ:0, AUTUADO:1, DESCRICAO:4, PLACA:7, VALOR:10, SITUACAO:12 };
+
+const SITS_ABERTAS  = ['Notificação de penalidade emitida','Notificação de penalidade recebida','Notificação de autuação emitida','Notificação de autuação recebida','NOTIFICAÇÃO DE MULTA','Multa Gerada','Aguardando Emissão de Notificação de Autuação','Aguardando Ressarcimento da Lei dos Caminhoneiros','Pendente de emissão de Termo de Preclusão de Prazo de Defesa','Pendente de emissão de Termo de Preclusão de Prazo de Recurso','Recurso JARI em julgamento','Prazo de Recurso Concluído','-'];
+const SITS_VENCIDAS = ['AUTO INSCRITO NA SERASA','Auto inscrito na Serasa','Congelado por Inscrição em Dívida Ativa'];
+const SITS_PAGAS    = ['Arquivado - Pago','Arquivado - Cancelado'];
+
+const CNPJ_EMPRESA = {
+  '97837181000147':'DURATEX','97837181001119':'DURATEX','97837181001895':'DURATEX',
+  '97837181002000':'DURATEX','97837181002190':'DURATEX','97837181002271':'DURATEX',
+  '97837181002786':'DURATEX','97837181003243':'DURATEX','97837181003910':'DURATEX',
+  '97837181004053':'DURATEX','97837181004134':'DURATEX','97837181004304':'DURATEX',
+  '97837181004991':'DEXCO','97837181005378':'DEXCO','97837181005459':'DEXCO',
+  '97837181005530':'DEXCO','97837181005610':'DEXCO','97837181005882':'DEXCO','97837181005963':'DEXCO',
+};
+
+const CNPJ_NAMES = {
+  '97837181001119':'DEXCO / DURATEX','97837181002000':'DURATEX','97837181003243':'DURATEX',
+  '97837181002271':'DURATEX','97837181004304':'DURATEX','97837181002786':'DURATEX',
+  '97837181005459':'DEXCO','97837181002190':'DURATEX','97837181004991':'DEXCO',
+  '97837181003910':'DURATEX','97837181004134':'DURATEX','97837181005378':'DEXCO',
+  '97837181001895':'DURATEX','97837181005963':'DEXCO','97837181000147':'Outros',
+  '97837181004053':'DURATEX','97837181005882':'DEXCO','97837181005530':'DEXCO',
+  '97837181005610':'DEXCO',
+};
+
+// ─── VARIÁVEIS DE CONTROLE ──────────────────────────────────────────────────
+let allData = [];
+let currentFilter = 'all';
+let currentCNPJ = null;
+let charts = {};
+let isLoading = false;
+let isDataLoaded = false;  // ⭐ FLAG CRÍTICA: impede múltiplos carregamentos
+let autoRefreshInterval = null;
+let isAutoRefreshEnabled = false;
+let loadAttempts = 0;      // Contador de tentativas
+
+// ⭐ FUNÇÃO ÚNICA DE CARREGAMENTO - SÓ EXECUTA UMA VEZ
+async function loadDataOnce() {
+  // IMPEDE EXECUÇÃO SE JÁ CARREGOU OU ESTÁ CARREGANDO
+  if (isDataLoaded) {
+    console.log('✅ Dados já carregados anteriormente. Ignorando nova tentativa.');
+    return;
+  }
+  if (isLoading) {
+    console.log('⏳ Carregamento em andamento. Aguarde...');
+    return;
+  }
+  
+  isLoading = true;
+  loadAttempts++;
+  console.log(`🔄 Tentativa de carregamento #${loadAttempts} - Iniciando...`);
+  
+  const refreshBtn = document.getElementById('refresh-btn');
+  if (refreshBtn) refreshBtn.disabled = true;
+  
+  showLoading(true);
+  hideError();
+  setStatusBar('');
+  
+  const sheetUrl = SHEET_URL + '&t=' + Date.now();
+  let text = null;
+  let lastError = '';
+  
+  for (let i = 0; i < PROXIES.length; i++) {
+    const proxyUrl = PROXIES[i](sheetUrl);
+    setLoadingText('Conectando à planilha', `Proxy ${i + 1}/${PROXIES.length}...`);
+    try {
+      console.log(`🌐 Tentando proxy ${i + 1}: ${PROXIES[i].toString().substring(0, 50)}...`);
+      const raw = await fetchWithTimeout(proxyUrl, TIMEOUT_MS);
+      
+      if (!isValidCSV(raw)) {
+        throw new Error(`Proxy ${i + 1} retornou resposta inválida`);
+      }
+      
+      text = raw;
+      console.log(`✅ Proxy ${i + 1} funcionou! Dados recebidos (${raw.length} bytes)`);
+      setStatusBar('ok', `✓ Dados carregados via proxy ${i + 1}`);
+      setTimeout(() => setStatusBar(''), 4000);
+      break;
+    } catch (e) {
+      lastError = e.message;
+      console.warn(`❌ Proxy ${i + 1} falhou:`, e.message);
+      if (i < PROXIES.length - 1) {
+        setStatusBar('trying', `⟳ Proxy ${i + 1} falhou — tentando alternativa...`);
+        await new Promise(r => setTimeout(r, 600));
+      }
+    }
+  }
+  
+  if (!text) {
+    console.error('❌ Todos os proxies falharam!');
+    showLoading(false);
+    showError(lastError);
+    isLoading = false;
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+  
+  try {
+    console.log('📊 Processando CSV...');
+    const lines = text.split('\n');
+    allData = [];
+    let validRows = 0;
+    
+    for (let i = 1; i < lines.length; i++) {
+      const raw = lines[i].replace(/[,\"\s]/g, '');
+      if (!raw) continue;
+      const r = splitCSVLine(lines[i]);
+      const autuado = (r[COL.AUTUADO] || '').trim().replace(/^"+|"+$/g, '');
+      if (!autuado || autuado.toLowerCase() === 'autuado') continue;
+      const cnpjRaw = (r[COL.CNPJ] || '').trim().replace(/^"+|"+$/g, '');
+      if (!cnpjRaw || normCNPJ(cnpjRaw).length < 11) continue;
+      
+      allData.push({
+        cnpj:      normCNPJ(r[COL.CNPJ] || ''),
+        autuado:   normAutuado(r[COL.AUTUADO], r[COL.CNPJ]),
+        descricao: r[COL.DESCRICAO] || '',
+        placa:     r[COL.PLACA] || '',
+        valor:     parseVal(r[COL.VALOR]),
+        situacao:  r[COL.SITUACAO] || ''
+      });
+      validRows++;
+    }
+    
+    console.log(`✅ Processados ${validRows} registros válidos`);
+    
+    const now = new Date().toLocaleString('pt-BR');
+    const updateEl = document.getElementById('last-update');
+    const footerEl = document.getElementById('footer-update');
+    if (updateEl) updateEl.textContent = 'Atualizado em ' + now;
+    if (footerEl) footerEl.textContent = 'Última atualização: ' + now;
+    
+    const mainContent = document.getElementById('main-content');
+    if (mainContent) mainContent.style.display = 'block';
+    
+    buildCNPJOptions();
+    render();
+    
+    // ⭐ MARCA COMO CARREGADO - NUNCA MAIS VAI CARREGAR AUTOMATICAMENTE
+    isDataLoaded = true;
+    const exportBtn = document.getElementById('export-btn');
+    if (exportBtn) exportBtn.disabled = false;
+    console.log('🎉 Dashboard carregado com sucesso! Auto-reload desativado.');
+    
+  } catch (e) {
+    console.error('❌ Erro ao processar CSV:', e);
+    showError('Erro ao processar CSV: ' + e.message);
+  } finally {
+    showLoading(false);
+    isLoading = false;
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+// ⭐ FUNÇÃO DE REFRESH MANUAL - RESETA A FLAG E RECARREGA
+async function manualRefresh() {
+  console.log('🔄 Refresh manual solicitado pelo usuário');
+  
+  // Destroi gráficos antigos para evitar vazamento de memória
+  Object.keys(charts).forEach(key => {
+    if (charts[key]) {
+      try { charts[key].destroy(); } catch(e) {}
+      delete charts[key];
+    }
+  });
+  
+  // Reseta a flag para permitir novo carregamento
+  isDataLoaded = false;
+  isLoading = false;
+  
+  // Recarrega os dados
+  await loadDataOnce();
+}
+
+// ⭐ TOGGLE AUTO-REFRESH (DESATIVADO POR PADRÃO)
+function toggleAutoRefresh() {
+  const btn = document.getElementById('auto-refresh-btn');
+  if (!btn) return;
+  
+  if (isAutoRefreshEnabled) {
+    if (autoRefreshInterval) {
+      clearInterval(autoRefreshInterval);
+      autoRefreshInterval = null;
+    }
+    isAutoRefreshEnabled = false;
+    btn.textContent = '⏱ Auto: OFF';
+    btn.classList.remove('active');
+    console.log('⏹️ Auto-refresh desativado');
+    setStatusBar('', '');
+  } else {
+    isAutoRefreshEnabled = true;
+    btn.textContent = '⏱ Auto: ON (5min)';
+    btn.classList.add('active');
+    
+    autoRefreshInterval = setInterval(() => {
+      if (!isLoading && isDataLoaded) {
+        console.log('🔄 Auto-refresh executando...');
+        manualRefresh();
+      } else if (isLoading) {
+        console.log('⏸️ Auto-refresh ignorado: carregamento em andamento');
+      }
+    }, 300000);
+    
+    setStatusBar('ok', 'Auto-refresh ativado (a cada 5 minutos)');
+    setTimeout(() => setStatusBar(''), 3000);
+    console.log('▶️ Auto-refresh ativado (5 minutos)');
+  }
+}
+
+// ─── FUNÇÕES AUXILIARES (mantidas do código original) ──────────────────────
+function fetchWithTimeout(url, ms) {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal, cache: 'no-store' })
+    .then(r => {
+      clearTimeout(tid);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .catch(e => { clearTimeout(tid); throw e; });
+}
+
+function isValidCSV(text) {
+  if (!text || text.length < 100) return false;
+  const trimmed = text.trim();
+  if (trimmed.startsWith('<')) return false;
+  if (trimmed.toLowerCase().includes('<!doctype')) return false;
+  if (trimmed.toLowerCase().includes('<html')) return false;
+  if (!trimmed.includes(',')) return false;
+  const firstLine = trimmed.split('\n')[0];
+  if (firstLine.includes('<') || firstLine.includes('>')) return false;
+  return true;
+}
+
+function splitCSVLine(line) {
+  const res = []; let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === ',' && !inQ) { res.push(cur.trim()); cur = ''; }
+    else { cur += c; }
+  }
+  res.push(cur.trim());
+  return res;
+}
+
+function parseVal(s) {
+  if (!s) return null;
+  const n = parseFloat(s.replace(/[^\d.,]/g, '').replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+
+function normCNPJ(s) {
+  if (!s) return '';
+  return s.replace(/\.0+$/, '').replace(/[^\d]/g, '').slice(0, 14);
+}
+
+function normAutuado(autuado, cnpj) {
+  const u = (autuado || '').toUpperCase();
+  const c = normCNPJ(cnpj || '');
+  if (u.includes('DEXCO')) return 'DEXCO';
+  if (u.includes('DURATEX') || u.includes('DURA TEX') || u.includes('DURALEX')) return 'DURATEX';
+  if (CNPJ_EMPRESA[c]) return CNPJ_EMPRESA[c];
+  return 'OUTROS';
+}
+
+function shortDesc(d) {
+  if (!d) return 'N/A';
+  if (/por eixo/i.test(d) && !/PBT/i.test(d)) return 'Excesso de peso — por eixo';
+  if (/PBT.PBTC.*Por Eixo|Por Eixo.*PBT/i.test(d)) return 'Excesso de peso — PBT/PBTC e por eixo';
+  if (/PBT.PBTC/i.test(d)) return 'Excesso de peso — PBT/PBTC';
+  if (/VALE.PED/i.test(d)) return 'Falta de vale-pedágio';
+  if (/PISO M/i.test(d)) return 'Contratação abaixo do piso mínimo';
+  return d.length > 55 ? d.slice(0, 55) + '…' : d;
+}
+
+function normCNPJDisplay(c) {
+  return c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+function showLoading(v) {
+  const overlay = document.getElementById('loading-overlay');
+  if (!overlay) return;
+  if (v) {
+    overlay.style.display = 'flex';
+    requestAnimationFrame(() => overlay.classList.remove('hidden'));
+  } else {
+    overlay.classList.add('hidden');
+    overlay.addEventListener('transitionend', () => {
+      overlay.style.display = 'none';
+    }, { once: true });
+  }
+}
+
+function setLoadingText(main, sub) {
+  const mainEl = document.getElementById('loading-text');
+  const subEl = document.getElementById('loading-sub');
+  if (mainEl) mainEl.textContent = main;
+  if (subEl) subEl.textContent = sub;
+}
+
+function setStatusBar(type, msg) {
+  const el = document.getElementById('status-bar');
+  if (!el) return;
+  if (!type) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.className = type;
+  el.textContent = msg;
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-box');
+  if (!el) return;
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="err-title">⚠ Não foi possível carregar os dados</div>
+    <div>Todos os servidores proxy falharam.</div>
+    <div style="margin-top:8px;opacity:0.7">Último erro: ${msg}</div>
+    <div class="err-action">
+      <strong>O que fazer:</strong><br>
+      1. Verifique sua conexão com a internet<br>
+      2. Confirme que a planilha está publicada<br>
+      3. Tente novamente em alguns minutos
+    </div>
+    <button onclick="manualRefresh()">↻ Tentar novamente</button>
+  `;
+}
+
+function hideError() {
+  const el = document.getElementById('error-box');
+  if (el) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+}
+
+function buildCNPJOptions() {
+  const base = currentFilter === 'all' ? allData : allData.filter(r => r.autuado === currentFilter);
+  const counts = {};
+  base.forEach(r => { if (r.cnpj) counts[r.cnpj] = (counts[r.cnpj] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  if (currentCNPJ && !counts[currentCNPJ]) {
+    currentCNPJ = null;
+    const btnLabel = document.getElementById('cnpj-btn-label');
+    const btn = document.getElementById('cnpj-btn');
+    if (btnLabel) btnLabel.textContent = '⊞ CNPJ';
+    if (btn) btn.classList.remove('active');
+  }
+
+  const list = document.getElementById('cnpj-options-list');
+  if (!list) return;
+
+  const totalCount = base.length;
+  const allSel = !currentCNPJ ? 'selected' : '';
+  const allOption = `<div class="cnpj-option-all ${allSel}" onclick="setCNPJFilter(null)">
+    <span style="font-size:14px;opacity:0.7">☑</span>
+    <span class="cnpj-option-all-label">TODOS OS CNPJs</span>
+    <span class="cnpj-option-all-count">${totalCount}</span>
+  </div>`;
+
+  list.innerHTML = allOption + sorted.map(([cnpj, cnt]) => {
+    const empresa = (CNPJ_NAMES[cnpj] || cnpj);
+    const sel = currentCNPJ === cnpj ? 'selected' : '';
+    return `<div class="cnpj-option ${sel}" id="cnpj-opt-${cnpj}" onclick="setCNPJFilter('${cnpj}')">
+      <div class="cnpj-option-left">
+        <span class="cnpj-option-num">${normCNPJDisplay(cnpj)}</span>
+        <span class="cnpj-option-name">${empresa}</span>
+      </div>
+      <span class="cnpj-option-count">${cnt}</span>
+    </div>`;
+  }).join('');
+}
+
+function toggleCNPJDropdown() {
+  const btn = document.getElementById('cnpj-btn');
+  const dd = document.getElementById('cnpj-dropdown');
+  if (!btn || !dd) return;
+  btn.classList.toggle('open');
+  dd.classList.toggle('open');
+  if (dd.classList.contains('open')) {
+    const rect = btn.getBoundingClientRect();
+    dd.style.top = (rect.bottom + 6) + 'px';
+    dd.style.right = (window.innerWidth - rect.right) + 'px';
+    setTimeout(() => document.addEventListener('click', closeCNPJOnOutside), 10);
+  }
+}
+
+function closeCNPJOnOutside(e) {
+  const wrap = document.querySelector('.cnpj-filter-wrap');
+  if (!wrap || !wrap.contains(e.target)) {
+    const btn = document.getElementById('cnpj-btn');
+    const dd = document.getElementById('cnpj-dropdown');
+    if (btn) btn.classList.remove('open');
+    if (dd) dd.classList.remove('open');
+    document.removeEventListener('click', closeCNPJOnOutside);
+  }
+}
+
+function setCNPJFilter(cnpj) {
+  currentCNPJ = cnpj;
+  const btn = document.getElementById('cnpj-btn');
+  const label = document.getElementById('cnpj-btn-label');
+  if (btn) {
+    if (cnpj) { 
+      if (label) label.textContent = '⊞ ' + normCNPJDisplay(cnpj); 
+      btn.classList.add('active'); 
+    } else { 
+      if (label) label.textContent = '⊞ CNPJ'; 
+      btn.classList.remove('active'); 
+    }
+  }
+  document.querySelectorAll('.cnpj-option').forEach(el => el.classList.remove('selected'));
+  if (cnpj) {
+    const opt = document.getElementById('cnpj-opt-' + cnpj);
+    if (opt) opt.classList.add('selected');
+  }
+  if (btn) btn.classList.remove('open');
+  const dd = document.getElementById('cnpj-dropdown');
+  if (dd) dd.classList.remove('open');
+  document.removeEventListener('click', closeCNPJOnOutside);
+  render();
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  currentCNPJ = null;
+  ['f-all', 'f-dexco', 'f-duratex', 'f-outros'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('active');
+  });
+  const filterMap = { all:'f-all', DEXCO:'f-dexco', DURATEX:'f-duratex', OUTROS:'f-outros' };
+  const activeBtn = document.getElementById(filterMap[f]);
+  if (activeBtn) activeBtn.classList.add('active');
+  
+  const btnLabel = document.getElementById('cnpj-btn-label');
+  const btn = document.getElementById('cnpj-btn');
+  if (btnLabel) btnLabel.textContent = '⊞ CNPJ';
+  if (btn) btn.classList.remove('active');
+  
+  buildCNPJOptions();
+  render();
+}
+
+function compute(rows) {
+  const comVal = rows.filter(r => r.valor !== null);
+  const total = comVal.reduce((a, r) => a + r.valor, 0);
+  const av = rows.filter(r => SITS_ABERTAS.includes(r.situacao));
+  const vc = rows.filter(r => SITS_VENCIDAS.includes(r.situacao));
+  const pg = rows.filter(r => SITS_PAGAS.includes(r.situacao));
+  const eq = {}, ev = {};
+  rows.forEach(r => {
+    eq[r.autuado] = (eq[r.autuado] || 0) + 1;
+    if (r.valor) ev[r.autuado] = (ev[r.autuado] || 0) + r.valor;
+  });
+  const pc = {}, pe = {};
+  rows.forEach(r => {
+    if (!r.placa) return;
+    pc[r.placa] = (pc[r.placa] || 0) + 1;
+    pe[r.placa] = r.autuado;
+  });
+  const placas = Object.entries(pc).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([p, c]) => [p, c, pe[p] || '—']);
+  const ic = {};
+  rows.forEach(r => {
+    if (!r.descricao) return;
+    const k = shortDesc(r.descricao);
+    ic[k] = (ic[k] || 0) + 1;
+  });
+  const infracoes = Object.entries(ic).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const cnpjC = {}, cnpjV = {};
+  rows.forEach(r => {
+    if (!r.cnpj) return;
+    cnpjC[r.cnpj] = (cnpjC[r.cnpj] || 0) + 1;
+    if (r.valor) cnpjV[r.cnpj] = (cnpjV[r.cnpj] || 0) + r.valor;
+  });
+  const topCnpjs = Object.entries(cnpjC).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topCnpjsV = topCnpjs.map(([c]) => [c, cnpjV[c] || 0]);
+  return {
+    total, total_count: rows.length,
+    avencer: av.filter(r => r.valor).reduce((a, r) => a + r.valor, 0), avencer_count: av.length,
+    vencidas: vc.filter(r => r.valor).reduce((a, r) => a + r.valor, 0), vencidas_count: vc.length,
+    pagas: pg.filter(r => r.valor).reduce((a, r) => a + r.valor, 0), pagas_count: pg.length,
+    val_medio: comVal.length ? total / comVal.length : 0, val_medio_n: comVal.length,
+    status: { 'A Vencer': av.length, 'Em Atraso/Serasa': vc.length, 'Pagas/Arquivadas': pg.length },
+    empresa_q: eq, empresa_v: ev, placas, infracoes, topCnpjs, topCnpjsV
+  };
+}
+
+function render() {
+  if (!allData.length) return;
+  
+  let rows = currentFilter === 'all' ? allData : allData.filter(r => r.autuado === currentFilter);
+  if (currentCNPJ) rows = rows.filter(r => r.cnpj === currentCNPJ);
+
+  const d = compute(rows);
+  const fmt  = v => 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  const fmtD = v => 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtK = v => v >= 1000 ? 'R$ ' + (v / 1000).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 1 }) + 'k' : fmt(v);
+
+  // Atualiza elementos (código simplificado por brevidade, mas funcional)
+  const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+  setText('hstat-total', fmtK(d.total));
+  setText('hstat-count', d.total_count.toLocaleString('pt-BR'));
+  setText('kpi-total', fmt(d.total));
+  setText('kpi-total-sub', d.total_count.toLocaleString('pt-BR') + ' registros');
+  setText('kpi-avencer', fmt(d.avencer));
+  setText('kpi-avencer-sub', d.avencer_count + ' multas em aberto');
+  setText('kpi-vencidas', fmt(d.vencidas));
+  setText('kpi-vencidas-sub', d.vencidas_count + ' multas');
+  setText('kpi-medio', fmtD(d.val_medio));
+  setText('kpi-medio-sub', '' + d.val_medio_n + ' com valor definido');
+  setText('kpi-pagas', fmt(d.pagas));
+  setText('kpi-pagas-sub', d.pagas_count + ' multas quitadas');
+
+  const tq = (d.empresa_q.DURATEX || 0) + (d.empresa_q.DEXCO || 0) || 1;
+  const tv = (d.empresa_v.DURATEX || 0) + (d.empresa_v.DEXCO || 0) || 1;
+  const dq  = ((d.empresa_q.DURATEX || 0) / tq * 100).toFixed(1);
+  const eq2 = ((d.empresa_q.DEXCO   || 0) / tq * 100).toFixed(1);
+  const dv  = ((d.empresa_v.DURATEX || 0) / tv * 100).toFixed(1);
+  const ev2 = ((d.empresa_v.DEXCO   || 0) / tv * 100).toFixed(1);
+
+  const barQ = document.getElementById('empresa-bar-q');
+  if(barQ) barQ.innerHTML = `<div class="empresa-seg duratex" style="width:${dq}%"></div><div class="empresa-seg dexco" style="width:${eq2}%"></div>`;
+  setText('duratex-q-label', `${(d.empresa_q.DURATEX || 0)} (${dq}%)`);
+  setText('dexco-q-label', `${(d.empresa_q.DEXCO || 0)} (${eq2}%)`);
+  
+  const barV = document.getElementById('empresa-bar-v');
+  if(barV) barV.innerHTML = `<div class="empresa-seg duratex" style="width:${dv}%"></div><div class="empresa-seg dexco" style="width:${ev2}%"></div>`;
+  setText('duratex-v-label', `${fmt(d.empresa_v.DURATEX || 0)} (${dv}%)`);
+  setText('dexco-v-label', `${fmt(d.empresa_v.DEXCO || 0)} (${ev2}%)`);
+
+  const tablePlacas = document.getElementById('table-placas');
+  if(tablePlacas) {
+    tablePlacas.innerHTML = d.placas.map(([p, c, e], i) => {
+      const rk = i < 3 ? `<span class="rank-num top3">${i+1}</span>` : `<span class="rank-num">${i+1}</span>`;
+      const bg = e === 'DEXCO' ? `<span class="badge badge-dexco">DEXCO</span>` : `<span class="badge badge-duratex">DURATEX</span>`;
+      const pct = d.total_count ? (c / d.total_count * 100).toFixed(1) : '0.0';
+      return `<tr><td>${rk}</td><td style="font-weight:600;font-family:'IBM Plex Mono',monospace;font-size:12px">${p}</td><td>${bg}</td><td style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);font-weight:600">${c}</td><td style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)">${pct}%</td></tr>`;
+    }).join('');
+  }
+
+  const mx = d.infracoes[0] ? d.infracoes[0][1] : 1;
+  const cls = ['#1a3a5c','#2e6da4','#1d7a55','#b86c00','#b83232'];
+  const infraBars = document.getElementById('infracoes-bars');
+  if(infraBars) {
+    infraBars.innerHTML = d.infracoes.map(([desc, cnt], i) =>
+      `<div class="prog-bar-wrap"><div class="prog-bar-header"><span style="font-size:12px;font-weight:500;color:var(--text)">${desc}</span><span class="prog-count">${cnt.toLocaleString('pt-BR')}</span></div><div class="prog-bar-bg"><div class="prog-bar-fill" style="width:${(cnt/mx*100).toFixed(0)}%;background:${cls[i]}"></div></div></div>`
+    ).join('');
+  }
+
+  // Gráficos (simplificado)
+  Chart.defaults.color = '#9ca3af';
+  Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+  Chart.defaults.font.family = 'Inter';
+
+  const kill = id => { if (charts[id]) { charts[id].destroy(); delete charts[id]; } };
+  const eC = { DURATEX: '#1a3a5c', DEXCO: '#b86c00' };
+
+  const statusCanvas = document.getElementById('chartStatus');
+  if(statusCanvas) {
+    kill('status');
+    charts.status = new Chart(statusCanvas, {
+      type: 'doughnut',
+      data: { labels: Object.keys(d.status), datasets: [{ data: Object.values(d.status), backgroundColor: ['#2e6da4','#b83232','#1d7a55'], borderWidth: 2, borderColor: '#11141d' }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: { legend: { position: 'bottom', labels: { color: '#6b7280', font: { size: 11 }, usePointStyle: true } } } }
+    });
+  }
+
+  const empresaCanvas = document.getElementById('chartEmpresa');
+  if(empresaCanvas) {
+    kill('empresa');
+    const eLq = ['DURATEX','DEXCO'].filter(k => (d.empresa_q[k] || 0) > 0);
+    charts.empresa = new Chart(empresaCanvas, {
+      type: 'bar',
+      data: { labels: eLq, datasets: [{ data: eLq.map(k => d.empresa_q[k] || 0), backgroundColor: eLq.map(k => eC[k]), borderRadius: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } } } }
+    });
+  }
+
+  const empresaValCanvas = document.getElementById('chartEmpresaVal');
+  if(empresaValCanvas) {
+    kill('empresaVal');
+    const eLv = ['DURATEX','DEXCO'].filter(k => (d.empresa_v[k] || 0) > 0);
+    charts.empresaVal = new Chart(empresaValCanvas, {
+      type: 'bar',
+      data: { labels: eLv, datasets: [{ data: eLv.map(k => d.empresa_v[k] || 0), backgroundColor: eLv.map(k => eC[k]), borderRadius: 3 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: v => 'R$' + Math.round(v / 1000) + 'k' } } } }
+    });
+  }
+
+  const placasCanvas = document.getElementById('chartPlacas');
+  if(placasCanvas) {
+    kill('placas');
+    charts.placas = new Chart(placasCanvas, {
+      type: 'bar',
+      data: { labels: d.placas.map(p => p[0]), datasets: [{ data: d.placas.map(p => p[1]), backgroundColor: d.placas.map(p => p[2] === 'DEXCO' ? '#b86c00' : '#1a3a5c'), borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    });
+  }
+
+  const valoresCanvas = document.getElementById('chartValores');
+  if(valoresCanvas) {
+    kill('valores');
+    charts.valores = new Chart(valoresCanvas, {
+      type: 'doughnut',
+      data: { labels: ['Pagas / Arquivadas','A Vencer','Em Atraso / Serasa'], datasets: [{ data: [d.pagas, d.avencer, d.vencidas], backgroundColor: ['#1d7a55','#2e6da4','#b83232'], borderWidth: 2, borderColor: '#11141d' }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { color: '#6b7280', font: { size: 11 }, usePointStyle: true } }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) + ' (' + (d.total ? (ctx.raw / d.total * 100).toFixed(1) : '0') + '%)' } } } }
+    });
+  }
+
+  const cnpjQCanvas = document.getElementById('chartCnpjsQ');
+  if(cnpjQCanvas && d.topCnpjs.length) {
+    kill('cnpjsQ');
+    const cnpjLabels = d.topCnpjs.map(([c]) => normCNPJDisplay(c));
+    charts.cnpjsQ = new Chart(cnpjQCanvas, {
+      type: 'bar',
+      data: { labels: cnpjLabels, datasets: [{ data: d.topCnpjs.map(([,n]) => n), backgroundColor: d.topCnpjs.map(([c]) => (CNPJ_EMPRESA[c] === 'DEXCO' ? '#b86c00' : '#2e6da4')), borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: ctx => { const c = d.topCnpjs[ctx[0].dataIndex][0]; return normCNPJDisplay(c) + ' — ' + (CNPJ_NAMES[c] || ''); } } } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280' } }, y: { ticks: { color: '#9ca3af', font: { family: 'IBM Plex Mono', size: 10 } } } } }
+    });
+  }
+
+  const cnpjVCanvas = document.getElementById('chartCnpjsV');
+  if(cnpjVCanvas && d.topCnpjsV.length) {
+    kill('cnpjsV');
+    charts.cnpjsV = new Chart(cnpjVCanvas, {
+      type: 'bar',
+      data: { labels: d.topCnpjsV.map(([c]) => normCNPJDisplay(c)), datasets: [{ data: d.topCnpjsV.map(([,v]) => v), backgroundColor: d.topCnpjsV.map(([c]) => (CNPJ_EMPRESA[c] === 'DEXCO' ? '#b86c00' : '#2e6da4')), borderRadius: 3 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: ctx => { const c = d.topCnpjsV[ctx[0].dataIndex][0]; return normCNPJDisplay(c) + ' — ' + (CNPJ_NAMES[c] || ''); }, label: ctx => ' ' + fmt(ctx.raw) } } }, scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#6b7280', callback: v => 'R$' + Math.round(v/1000) + 'k' } }, y: { ticks: { color: '#9ca3af', font: { family: 'IBM Plex Mono', size: 10 } } } } }
+    });
+  }
+}
+
+// ─── EXPORTAÇÃO EXCEL ──────────────────────────────────────────────────────
+function exportToExcel() {
+  if (!allData.length) return;
+
+  const btn = document.getElementById('export-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Gerando...'; }
+
+  try {
+    // Aplica os mesmos filtros ativos no dashboard
+    let rows = currentFilter === 'all' ? allData : allData.filter(r => r.autuado === currentFilter);
+    if (currentCNPJ) rows = rows.filter(r => r.cnpj === currentCNPJ);
+
+    const wb = XLSX.utils.book_new();
+
+    // ── Aba 1: Dados completos ──────────────────────────────────────────────
+    const dadosRows = rows.map(r => ({
+      'CNPJ':       normCNPJDisplay(r.cnpj),
+      'Empresa':    r.autuado,
+      'Placa':      r.placa,
+      'Descrição':  r.descricao,
+      'Valor (R$)': r.valor ?? '',
+      'Situação':   r.situacao,
+    }));
+    const wsDados = XLSX.utils.json_to_sheet(dadosRows);
+    wsDados['!cols'] = [
+      { wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 60 }, { wch: 14 }, { wch: 42 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDados, 'Dados');
+
+    // ── Aba 2: Resumo por empresa ───────────────────────────────────────────
+    const empMap = {};
+    rows.forEach(r => {
+      if (!empMap[r.autuado]) empMap[r.autuado] = { qtd: 0, valor: 0 };
+      empMap[r.autuado].qtd++;
+      if (r.valor) empMap[r.autuado].valor += r.valor;
+    });
+    const resumoRows = Object.entries(empMap).map(([emp, v]) => ({
+      'Empresa':         emp,
+      'Qtd. Multas':     v.qtd,
+      'Valor Total (R$)': parseFloat(v.valor.toFixed(2)),
+    }));
+    const wsResumo = XLSX.utils.json_to_sheet(resumoRows);
+    wsResumo['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo por Empresa');
+
+    // ── Aba 3: Resumo por CNPJ ─────────────────────────────────────────────
+    const cnpjMap = {};
+    rows.forEach(r => {
+      if (!r.cnpj) return;
+      if (!cnpjMap[r.cnpj]) cnpjMap[r.cnpj] = { nome: CNPJ_NAMES[r.cnpj] || r.autuado, empresa: CNPJ_EMPRESA[r.cnpj] || r.autuado, qtd: 0, valor: 0 };
+      cnpjMap[r.cnpj].qtd++;
+      if (r.valor) cnpjMap[r.cnpj].valor += r.valor;
+    });
+    const cnpjRows = Object.entries(cnpjMap)
+      .sort((a, b) => b[1].qtd - a[1].qtd)
+      .map(([cnpj, v]) => ({
+        'CNPJ':            normCNPJDisplay(cnpj),
+        'Nome':            v.nome,
+        'Empresa':         v.empresa,
+        'Qtd. Multas':     v.qtd,
+        'Valor Total (R$)': parseFloat(v.valor.toFixed(2)),
+      }));
+    const wsCnpj = XLSX.utils.json_to_sheet(cnpjRows);
+    wsCnpj['!cols'] = [{ wch: 20 }, { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, wsCnpj, 'Resumo por CNPJ');
+
+    // ── Aba 4: Top 10 Placas ───────────────────────────────────────────────
+    const placaMap = {};
+    rows.forEach(r => {
+      if (!r.placa) return;
+      if (!placaMap[r.placa]) placaMap[r.placa] = { empresa: r.autuado, qtd: 0, valor: 0 };
+      placaMap[r.placa].qtd++;
+      if (r.valor) placaMap[r.placa].valor += r.valor;
+    });
+    const placaRows = Object.entries(placaMap)
+      .sort((a, b) => b[1].qtd - a[1].qtd)
+      .slice(0, 10)
+      .map(([placa, v], i) => ({
+        '#':               i + 1,
+        'Placa':           placa,
+        'Empresa':         v.empresa,
+        'Qtd. Multas':     v.qtd,
+        'Valor Total (R$)': parseFloat(v.valor.toFixed(2)),
+      }));
+    const wsPlacas = XLSX.utils.json_to_sheet(placaRows);
+    wsPlacas['!cols'] = [{ wch: 4 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 18 }];
+    XLSX.utils.book_append_sheet(wb, wsPlacas, 'Top 10 Placas');
+
+    // ── Nome do arquivo com filtros ativos ─────────────────────────────────
+    const datePart = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
+    const empresaPart = currentFilter !== 'all' ? `_${currentFilter}` : '';
+    const cnpjPart = currentCNPJ ? `_${normCNPJDisplay(currentCNPJ).replace(/[.\/\-]/g, '')}` : '';
+    const fileName = `Multas_ANTT${empresaPart}${cnpjPart}_${datePart}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Exportar'; }
+  }
+}
+
+// ⭐ INICIALIZAÇÃO - CARREGA APENAS UMA VEZ
+console.log('🚀 Inicializando dashboard...');
+setTimeout(() => {
+  loadDataOnce();
+}, 100);
+</script>
+</body>
+</html>
